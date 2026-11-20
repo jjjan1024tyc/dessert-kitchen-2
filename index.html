@@ -175,6 +175,7 @@ select#voice { font: inherit; font-size: 17px; padding: 10px 12px; border-radius
 /* video */
 .vid { position: relative; border-radius: 14px; overflow: hidden; background: #000; aspect-ratio: 1280 / 744; max-width: 100%; }
 .vid video { width: 100%; height: 100%; display: block; object-fit: cover; }
+.vid.small { width: min(100%, calc(30vh * 1280 / 744)); margin: 0 auto; }
 .vid .cover {
   position: absolute; inset: 0; border: 0; background: rgba(0,0,0,.12);
   display: flex; align-items: center; justify-content: center;
@@ -284,6 +285,41 @@ th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line
 input[type=text], input[type=number] { font: inherit; font-size: 20px; padding: 10px 12px; border-radius: 10px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); width: 120px; }
 .foot { text-align: center; }
 .linkish { background: none; border: 0; color: var(--muted); text-decoration: underline; font-size: 15px; min-height: 44px; padding: 8px 12px; }
+
+/* spelling with letter tiles */
+.word { display: flex; gap: 6px; justify-content: center; }
+.lt {
+  flex: 0 1 46px; min-width: 0; aspect-ratio: 46 / 58; border-radius: 10px; border: 2px solid var(--line);
+  display: flex; align-items: center; justify-content: center; font-family: var(--f-en); font-size: clamp(20px, 6vw, 30px); font-weight: 600;
+}
+.lt.given { border-color: transparent; background: var(--surface-2); }
+.lt.blank { border-style: dashed; }
+.lt.cur { border-style: solid; border-color: var(--accent); background: var(--accent-soft); }
+.lt.fill { border-color: var(--ok); color: var(--ok); background: var(--ok-bg); }
+.tile.letter { min-width: 56px; font-size: 28px; }
+.frame { font-size: clamp(24px, 5.4vw, 36px); }
+.gap { display: inline-block; min-width: 2.2em; border-bottom: 3px solid var(--accent); color: var(--accent); }
+.done-line { color: var(--ok); font-weight: 700; font-size: 20px; }
+
+/* baking stages: 麵糊 → 進烤箱 → 出爐 → 完美 */
+.stg { display: inline-block; font-size: 13px; font-weight: 700; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.stg.s1 { background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); }
+.stg.s2 { background: var(--hint-bg); color: var(--hint); }
+.stg.s3 { background: var(--verb-bg); color: var(--verb); }
+.stg.s4 { background: var(--gold); color: var(--surface); }
+.ov { display: inline-flex; gap: 3px; align-items: center; }
+.ov i { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--gold); display: block; }
+.ov i.on { background: var(--gold); }
+.cell .ov { margin-top: 3px; }
+.cell .ov i { width: 7px; height: 7px; border-width: 1px; }
+.wlist { display: grid; gap: 6px; width: 100%; }
+.wrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--surface-2); border-radius: 12px; padding: 8px 12px; text-align: left; }
+.wrow .we { font-family: var(--f-en); font-weight: 600; font-size: 20px; }
+.wrow .wz { color: var(--muted); font-size: 16px; }
+.wrow .wr { margin-left: auto; display: inline-flex; gap: 8px; align-items: center; }
+.up { color: var(--ok); font-weight: 700; font-size: 14px; }
+.wtags { display: flex; flex-wrap: wrap; gap: 6px; }
+.wb { font-family: var(--f-en); font-size: 15px; font-weight: 600; display: inline-flex; gap: 4px; align-items: center; }
 
 @media (prefers-reduced-motion: reduce) {
   .reveal.pop svg, .tile.shake { animation: none; }
@@ -521,26 +557,53 @@ function glossHTML(s) {
   return `<span class="gloss">${col(s[0], s[2], "v")}${m ? col(m[1], "") + col(m[2] + ".", s[3]) : col(s[1] + ".", s[3])}</span>`;
 }
 
+/* ---------- 單字與烘焙進度 ---------- */
+// 每個動詞、名詞各自有烘焙階段：1 麵糊 → 2 進烤箱 → 3 出爐 → 4 完美
+// 只有在「今日出爐」裡，到期的字第一次就拼對才會升一級；升到第 k 級後隔 GAP[k] 天再出現（完美之後每 30 天）
+// 第一次沒拼對：不降級，明天再出現，並在同一輪最後用選擇題再出現一次
+const STAGES = ["", "麵糊", "進烤箱", "出爐", "完美"];
+const GAP = [0, 1, 3, 7, 14, 30];
+const DAILY_MIN = 6, DAILY_MAX = 8;
+const nounOf = (n) => S[n].o.replace(/^(a|an|the) /, "");
+const artOf = (n) => { const m = S[n].o.match(/^(a|an|the) /); return m ? m[0] : ""; };
+const nounZh = (n) => S[n].om[S[n].om.length - 1].replace(/（.*）/, "");
+const vKey = (n) => "v:" + S[n].v;
+const oKey = (n) => "o:" + nounOf(n);
+const keysOf = (n) => [vKey(n), oKey(n)];
+const wText = (k) => k.slice(2);
+const isVerb = (k) => k[0] === "v";
+const sentOf = (k) => [...Array(24).keys()].filter((n) => keysOf(n).includes(k));
+const zhOf = (k, n = sentOf(k)[0]) => isVerb(k) ? S[n].zv : nounZh(n);
+const ALL_KEYS = [...new Set([...Array(24).keys()].flatMap(keysOf))];
+
 /* ---------- 儲存 ---------- */
-const KEY = "dessert-kitchen-v1";
-const MAX_STARS = 6;
-// info[n]: learned 學會日期, reviews 複習總次數, stars 星星（一天最多一顆，學會當天不算）, starDay 最後加星的日期, lastReview 最後複習日期
-function fresh() { return { learned: [], info: {}, log: [], outbox: [] }; }
+// 和舊版網站（同一個 github.io 網域）分開存；第一次打開時從舊版複製進度，舊版不受影響
+const KEY = "dessert-kitchen-v2";
+const OLD_KEY = "dessert-kitchen-v1";
+// info[n]: learned 學會日期, reviews 複習次數, lastReview 最後複習日期
+// words[key]: lvl 階段, due 下次出現日期, up 最後升級日期, seen 今日出爐出現次數, first 第一次就拼對次數
+function fresh() { return { learned: [], info: {}, words: {}, newDay: "", log: [], outbox: [] }; }
 function load() {
   try {
-    const s = JSON.parse(localStorage.getItem(KEY));
+    const s = JSON.parse(localStorage.getItem(KEY) || localStorage.getItem(OLD_KEY));
     if (!s) return null;
+    if (!localStorage.getItem(KEY)) s.outbox = []; // 舊版還沒寄出的通知留給舊版寄
     const n = fresh();
     if (Array.isArray(s.learned)) n.learned = s.learned;
     else if (typeof s.next === "number") n.learned = [...Array(s.next).keys()];
     else return null;
     n.outbox = s.outbox || [];
     n.voice = s.voice || "";
-    n.log = (s.log || []).filter((e) => e.n && e.kind);
+    n.log = (s.log || []).filter((e) => e && e.kind);
+    n.newDay = s.newDay || "";
+    n.words = s.words || {};
+    const t = today();
     n.learned.forEach((k) => {
       const o = (s.info || {})[k] || {};
-      n.info[k] = typeof o.reviews === "number" ? o
-        : { learned: o.learned || "2000-01-01", reviews: o.perfect || 0, stars: Math.min(o.perfect || 0, MAX_STARS), starDay: "", lastReview: "" };
+      n.info[k] = typeof o.reviews === "number" ? o : { learned: o.learned || "2000-01-01", reviews: o.perfect || 0, lastReview: "" };
+      if (!s.newDay && n.info[k].learned === t) n.newDay = t;
+      // 舊版沒有單字進度：先放「麵糊」，今天就出現在今日出爐
+      keysOf(k).forEach((w) => { if (!n.words[w]) n.words[w] = { lvl: 1, due: t, up: "", seen: 0, first: 0 }; });
     });
     return n;
   } catch (e) {}
@@ -548,11 +611,46 @@ function load() {
 }
 let st = load() || fresh();
 function save() { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) {} }
-function today() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+function fmt(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+function today() { return fmt(new Date()); }
+function addDays(t, k) { const [y, m, d] = t.split("-").map(Number); return fmt(new Date(y, m - 1, d + k)); }
 const isLearned = (n) => st.learned.includes(n);
-const starsOf = (n) => isLearned(n) ? Math.min(st.info[n].stars, MAX_STARS) : 0;
-const totalStars = () => st.learned.reduce((a, n) => a + starsOf(n), 0);
-const starStr = (k) => "★".repeat(k);
+const learnedKeys = () => [...new Set(st.learned.flatMap(keysOf))];
+const lvlOf = (k) => (st.words[k] || { lvl: 0 }).lvl;
+const dueKeys = () => learnedKeys().filter((k) => st.words[k].due <= today());
+const dessertLvl = (n) => Math.min(...keysOf(n).map(lvlOf));
+const perfectCount = () => learnedKeys().filter((k) => lvlOf(k) >= 4).length;
+const stageHTML = (l) => l ? `<span class="stg s${l}">${STAGES[l]}</span>` : "";
+const dotsHTML = (l) => `<span class="ov" aria-label="${STAGES[l]}">${[1, 2, 3, 4].map((i) => `<i class="${i <= l ? "on" : ""}"></i>`).join("")}</span>`;
+function addWords(n, t) {
+  keysOf(n).forEach((k) => { if (!st.words[k]) st.words[k] = { lvl: 1, due: addDays(t, 1), up: t, seen: 0, first: 0 }; });
+}
+// 今日出爐的一題結束：回傳 [原階段, 新階段]，沒升級回傳 null
+function grade(k, ok) {
+  const w = st.words[k], t = today();
+  const wasDue = w.due <= t;
+  w.seen++;
+  if (!ok) { w.due = addDays(t, 1); return null; }
+  w.first++;
+  if (!wasDue || w.up === t) return null;
+  const from = w.lvl;
+  w.lvl = Math.min(4, w.lvl + 1);
+  w.up = t;
+  w.due = addDays(t, GAP[from === 4 ? 5 : w.lvl]);
+  return from === 4 ? null : [from, w.lvl];
+}
+// 今天要出爐的字：到期的先（最久的先），最多 8 個；不到 6 個時用其他學過的字補（補的字不會升級）
+function dailyKeys() {
+  const due = shuffle(dueKeys()).sort((a, b) => (st.words[a].due < st.words[b].due ? -1 : st.words[a].due > st.words[b].due ? 1 : lvlOf(a) - lvlOf(b)));
+  let take = due.slice(0, DAILY_MAX);
+  if (take.length && take.length < DAILY_MIN) {
+    const more = shuffle(learnedKeys().filter((k) => !take.includes(k))).sort((a, b) => lvlOf(a) - lvlOf(b));
+    take = take.concat(more.slice(0, DAILY_MIN - take.length));
+  }
+  return take;
+}
+// 新句子：一天一句，而且要先完成今日出爐
+const newBlock = () => st.newDay === today() ? "today" : dueKeys().length ? "due" : "";
 
 /* ---------- 小工具 ---------- */
 const app = document.getElementById("app");
@@ -641,6 +739,16 @@ function enHTML(n, tappable = false) {
   }).join(" ");
 }
 function zhHTML(n) { const s = S[n]; return s.zh.replace(s.zv, `<span class="v">${s.zv}</span>`); }
+// 中文句子裡，標出這一題要拼的字
+function zhMark(n, k) {
+  const s = S[n], t = isVerb(k) ? s.zv : nounZh(n);
+  return s.zh.includes(t) ? s.zh.replace(t, `<span class="v">${t}</span>`) : s.zh;
+}
+// 英文句子，要拼的字挖空
+function frameHTML(n, k) {
+  const gap = `<span class="gap">？</span>`;
+  return isVerb(k) ? `I am ${gap} ${S[n].o}.` : `I am <span class="v">${S[n].v}</span> ${artOf(n)}${gap}.`;
+}
 function meaningOf(n, i) {
   const s = S[n];
   if (i === 0) return "我";
@@ -655,13 +763,27 @@ function wireWords(n) {
     $("#mean").innerHTML = `<b>${w}</b> ＝ ${meaningOf(n, i)}`;
   });
 }
+function wordRow(k, extra = "") {
+  const l = lvlOf(k);
+  return `<div class="wrow"><span class="we">${wText(k)}</span><span class="wz">${zhOf(k)}</span><span class="wr">${extra}${dotsHTML(l)}${stageHTML(l)}</span></div>`;
+}
 
-/* ---------- 影片（要不要播放由孩子決定） ---------- */
+/* ---------- 影片 ---------- */
 let curVideo = null;
+const vsrc = (n) => `videos/${String(n + 1).padStart(2, "0")}.mp4`;
+// 看影片步驟：要不要播放由孩子決定
 function videoHTML(n) {
-  const src = `videos/${String(n + 1).padStart(2, "0")}.mp4`;
-  return `<div class="vid"><video src="${src}#t=0.6" playsinline preload="metadata"></video>
+  return `<div class="vid"><video src="${vsrc(n)}#t=0.6" playsinline preload="metadata"></video>
     <button class="cover" aria-label="播放影片">${PLAY}</button></div>`;
+}
+// 拼字題：靜音自動重複播放，只給動作畫面當提示
+function loopHTML(n) {
+  return `<div class="vid small"><video src="${vsrc(n)}" muted autoplay loop playsinline preload="auto"></video></div>`;
+}
+function wireLoop() {
+  const v = $("video"); if (!v) return;
+  curVideo = v; v.muted = true;
+  const p = v.play(); if (p && p.catch) p.catch(() => {});
 }
 // onWatched：從頭看到最後才呼叫；影片載入失敗也呼叫，避免卡住
 function wireVideo(onWatched) {
@@ -682,44 +804,174 @@ function wireVideo(onWatched) {
 }
 function stopVideo() { try { curVideo && curVideo.pause(); } catch (e) {} curVideo = null; }
 
-/* ---------- 首頁：集點卡 ---------- */
+/* ---------- 拼單字（字母磚） ---------- */
+// 麵糊：缺 1～2 個字母；進烤箱：缺一半；出爐、完美：整個字的字母打亂
+function spellPlan(word, lvl) {
+  const idx = [...Array(word.length).keys()];
+  let miss;
+  if (lvl >= 3) miss = idx;
+  else {
+    const k = lvl <= 1 ? Math.min(2, Math.max(1, Math.round(word.length / 4))) : Math.ceil(word.length / 2);
+    miss = shuffle(idx).slice(0, k).sort((a, b) => a - b);
+  }
+  const need = miss.map((i) => word[i]);
+  const extra = lvl >= 3 ? [] : shuffle("abcdefghiklmnoprstuvwy".split("").filter((c) => !need.includes(c))).slice(0, 2);
+  return { miss, tiles: shuffle([...need, ...extra]) };
+}
+// o = { n 句子, k 單字, lvl 難度, count 題數標籤, mount(html) 放上畫面, done(clean) 回傳完成訊息, nextLabel, next }
+// clean ＝ 沒按錯、沒用提示，一次就拼對
+function spellQ(o) {
+  const { n, k } = o, word = wText(k), plan = spellPlan(word, o.lvl);
+  let pos = 0, clean = true, locked = false;
+  const box = (i) => plan.miss.includes(i) ? `<span class="lt blank" data-p="${i}"></span>` : `<span class="lt given">${word[i]}</span>`;
+  o.mount(`<div class="card">
+    <div class="row" style="justify-content:space-between"><p class="ask">拼出「${zhOf(k, n)}」的英文</p>${o.count || ""}</div>
+    ${loopHTML(n)}
+    <div class="subs" id="sent"><p class="en frame">${frameHTML(n, k)}</p><p class="zh">${zhMark(n, k)}</p></div>
+    <div class="word">${[...word].map((_, i) => box(i)).join("")}</div>
+    <div class="tiles" id="tiles">${plan.tiles.map((c) => `<button class="tile letter" data-c="${c}">${c}</button>`).join("")}</div>
+    <p class="fb" id="fb"></p>
+    <div class="row" id="hintRow"><button class="btn ghost" id="hint">給我提示</button></div>
+    <button class="btn big" id="next" hidden></button>
+  </div>`);
+  wireLoop();
+  const fb = $("#fb");
+  const want = () => word[plan.miss[pos]];
+  const mark = () => $$(".lt.blank").forEach((s) => s.classList.toggle("cur", +s.dataset.p === plan.miss[pos]));
+  const glowRight = () => {
+    const t = $$(".tile.letter").find((t) => !t.classList.contains("used") && t.dataset.c === want());
+    if (t) t.classList.add("glow");
+  };
+  mark();
+  $$(".tile.letter").forEach((b) => b.onclick = () => {
+    if (locked || pos >= plan.miss.length || b.classList.contains("used")) return;
+    if (b.dataset.c === want()) {
+      const s = $(`.lt[data-p="${plan.miss[pos]}"]`);
+      s.textContent = b.dataset.c; s.className = "lt fill";
+      b.classList.add("used"); $$(".tile").forEach((t) => t.classList.remove("glow"));
+      pos++;
+      fb.className = "fb"; fb.textContent = "";
+      mark();
+      if (pos === plan.miss.length) finish();
+    } else {
+      // 按錯：不扣分，亮出正確的字母，停 1 秒，避免一直亂按
+      clean = false; locked = true;
+      b.classList.remove("shake"); void b.offsetWidth; b.classList.add("shake");
+      glowRight();
+      fb.className = "fb try"; fb.textContent = "不是這個字母，看看發亮的那一個。";
+      setTimeout(() => { locked = false; }, 1000);
+    }
+  });
+  $("#hint").onclick = () => { clean = false; glowRight(); };
+  function finish() {
+    $("#tiles").hidden = true; $("#hintRow").hidden = true;
+    $("#sent").innerHTML = `<p class="en">${enHTML(n)}</p><p class="zh">${zhHTML(n)}</p>`;
+    fb.className = clean ? "fb good" : "fb";
+    fb.innerHTML = o.done(clean);
+    const nx = $("#next");
+    nx.textContent = typeof o.nextLabel === "function" ? o.nextLabel() : o.nextLabel;
+    // 念完單字和整句，才出現下一步
+    speakThen(word, () => speakThen(enOf(n), () => { if (nx.isConnected) { nx.hidden = false; nx.focus(); } }));
+  }
+  $("#next").onclick = o.next;
+}
+
+/* ---------- 再一次（第一次沒拼對的字，在這一輪最後用選擇題再出現） ---------- */
+function pickQ(o) {
+  const { n, k } = o;
+  const same = (x) => x !== k && isVerb(x) === isVerb(k);
+  const known = shuffle(learnedKeys().filter(same));
+  const rest = shuffle(ALL_KEYS.filter((x) => same(x) && !known.includes(x)));
+  const opts = shuffle([k, ...known.concat(rest).slice(0, 2)]);
+  o.mount(`<div class="card">
+    <div class="row" style="justify-content:space-between"><p class="ask">再一次：「${zhOf(k, n)}」是哪一個字？</p>${o.count || ""}</div>
+    ${loopHTML(n)}
+    <div class="subs" id="sent"><p class="en frame">${frameHTML(n, k)}</p></div>
+    <div class="opts">${opts.map((x) => `<button class="opt" data-k="${x}"><span class="oe">${wText(x)}</span></button>`).join("")}</div>
+    <p class="fb" id="fb"></p>
+    <button class="btn big" id="next" hidden></button>
+  </div>`);
+  wireLoop();
+  let locked = false;
+  $$(".opt").forEach((b) => b.onclick = () => {
+    if (locked || b.classList.contains("no")) return;
+    const fb = $("#fb"), nx = $("#next");
+    locked = true;
+    if (b.dataset.k === k) {
+      $$(".opt").forEach((x) => x.classList.remove("glow"));
+      b.classList.add("yes");
+      fb.className = "fb good"; fb.textContent = "對了！";
+      $("#sent").innerHTML = `<p class="en">${enHTML(n)}</p><p class="zh">${zhHTML(n)}</p>`;
+      nx.textContent = typeof o.nextLabel === "function" ? o.nextLabel() : o.nextLabel;
+      speakThen(enOf(n), () => { if (nx.isConnected) { nx.hidden = false; nx.focus(); } });
+    } else {
+      b.classList.add("no");
+      $$(".opt").find((x) => x.dataset.k === k).classList.add("glow");
+      fb.className = "fb try"; fb.textContent = `是發亮的那一個：${wText(k)}`;
+      speakThen(wText(k), () => { locked = false; });
+    }
+  });
+  $("#next").onclick = o.next;
+}
+
+/* ---------- 首頁：今天的廚房＋集點卡 ---------- */
 function header() {
   return `<div class="top"><div class="brand"><h1>甜點廚房</h1><span>English Kitchen</span></div>
-    <button class="chip" id="toShelf">我的點心櫃 <b>${st.learned.length}/24</b> <b style="color:var(--gold)">★${totalStars()}</b></button></div>`;
+    <button class="chip" id="toShelf">我的點心櫃 <b>${st.learned.length}/24</b> <b style="color:var(--gold)">完美 ${perfectCount()}</b></button></div>`;
 }
 function cellHTML(n) {
-  const t = today();
-  if (!isLearned(n)) return `<div class="cell"><button class="stamp" data-n="${n}" aria-label="學第 ${n + 1} 句">${n + 1}</button><span class="stars"></span><span class="today"></span></div>`;
-  const I = st.info[n];
-  const tags = [I.learned === t ? `<span class="today new">今天新句</span>` : "", I.lastReview === t ? `<span class="today">今天複習</span>` : ""].join("");
-  return `<div class="cell"><button class="stamp got" data-n="${n}" aria-label="${D[n].name}">${ART[n]}</button>
-    <span class="stars" aria-label="${starsOf(n)} 顆星">${starStr(starsOf(n))}</span>${tags || `<span class="today"></span>`}</div>`;
+  if (!isLearned(n)) return `<div class="cell"><button class="stamp" data-n="${n}" aria-label="學第 ${n + 1} 句">${n + 1}</button><span class="today"></span></div>`;
+  const l = dessertLvl(n);
+  const tag = st.info[n].learned === today() ? `<span class="today new">今天新句</span>` : `<span class="today">${STAGES[l]}</span>`;
+  return `<div class="cell"><button class="stamp got" data-n="${n}" aria-label="${D[n].name}">${ART[n]}</button>${dotsHTML(l)}${tag}</div>`;
 }
 function home() {
   stopVideo();
-  L = null;
-  const left = 24 - st.learned.length;
+  L = null; DS = null;
+  const nl = st.learned.length, dk = dailyKeys(), blk = newBlock();
+  const daily = !nl ? `<p>先按下面集點卡上的 <b>1</b>，學第一句。</p>`
+    : dk.length ? `<button class="btn big" id="daily">開始今日出爐（${dk.length} 題）</button>`
+    : `<p class="done-line">✓ 今天的字都烤好了</p>`;
+  const nw = nl === 24 ? "24 句都學會了！每天的今日出爐會繼續把字烤到「完美」。"
+    : blk === "today" ? "✓ 今天學了一句新的，明天再學下一句。"
+    : blk === "due" ? "完成今日出爐之後，就可以學一句新的。"
+    : "按集點卡上的數字格子，學一句新的。";
   app.innerHTML = header() + `<div class="card">
-      <div class="row" style="justify-content:space-between"><h3>集點卡</h3><span class="qcount">${st.learned.length} / 24　★ ${totalStars()}</span></div>
-      <p class="small">按<b>數字格子</b>：學新句子。按<b>點心</b>：看介紹、複習。${left === 0 ? "24 句都學會了，可以繼續複習集星星！" : ""}</p>
+      <h3>今天的廚房</h3>
+      ${daily}
+      <p class="small"><b>新句子：</b>${nw}</p>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between"><h3>集點卡</h3><span class="qcount">${nl} / 24</span></div>
+      <p class="small">按<b>數字格子</b>：學新句子。按<b>點心</b>：看介紹、複習。</p>
+      <p class="fb" id="hmsg" hidden></p>
       <div class="stamps">${[...Array(24).keys()].map(cellHTML).join("")}</div>
-      <p class="muted small">每一句都是：看影片 → 選選看 → 排句子 → 找錯句。學會新句子得到一個點心；在不同的日子複習，每天可以加一顆 ★，最多 ${MAX_STARS} 顆。</p>
+      <p class="muted small">每一句：看影片 → 拼單字 → 排句子 → 找錯句。每個英文字會經過 麵糊 → 進烤箱 → 出爐 → 完美：在「今日出爐」裡<b>第一次就拼對</b>，就往前一格。</p>
     </div>
     <div class="foot row" style="justify-content:center"><button class="linkish" id="toParent">家長區</button></div>`;
   $("#toShelf").onclick = shelf;
+  if ($("#daily")) $("#daily").onclick = startDaily;
   $$(".stamp[data-n]").forEach((b) => b.onclick = () => {
     const n = +b.dataset.n;
-    if (isLearned(n)) showDessert(n); else startItem(n, "new");
+    if (isLearned(n)) return showDessert(n);
+    const why = newBlock();
+    if (why) {
+      const m = $("#hmsg");
+      m.hidden = false; m.className = "fb try";
+      m.textContent = why === "today" ? "今天已經學過一句新的了，明天再來學這一句。" : "先完成上面的「今日出爐」，再來學新句子。";
+      return;
+    }
+    startItem(n, "new");
   });
   $("#toParent").onclick = parentGate;
   window.scrollTo(0, 0);
 }
 
-/* ---------- 一句的流程（新句子和複習一樣）：看影片 → 選選看 → 排句子 → 找錯句 ---------- */
-const STEP_NAMES = ["看影片", "選選看", "排句子", "找錯句"];
+/* ---------- 一句的流程（新句子和複習一樣）：看影片 → 拼單字 → 排句子 → 找錯句 ---------- */
+const STEP_NAMES = ["看影片", "拼單字", "排句子", "找錯句"];
 let L = null;
 function startItem(n, kind) {
-  L = { n, kind, step: 0, qi: 0, qs: [], mistakes: 0, start: Date.now() };
+  L = { n, kind, step: 0, si: 0, mistakes: 0, start: Date.now() };
   runStep();
 }
 function lessonShell(body) {
@@ -734,14 +986,9 @@ function lessonShell(body) {
   $("#rest").onclick = home;
   window.scrollTo(0, 0);
 }
-function pickOthers(n, k) {
-  const known = shuffle(st.learned.filter((i) => i !== n));
-  const rest = shuffle([...Array(24).keys()].filter((i) => i !== n && !known.includes(i)));
-  return [...known, ...rest].slice(0, k);
-}
 function runStep() {
   stopVideo();
-  [watch, quiz, build, findWrong, itemDone][L.step]();
+  [watch, spellStep, build, findWrong, itemDone][L.step]();
 }
 function nextStep() { L.step++; runStep(); }
 
@@ -753,71 +1000,26 @@ function watch() {
     <div class="subs"><p class="en">${enHTML(n, true)}</p><p class="zh">${zhHTML(n)}</p></div>
     <p class="meaning" id="mean">按一下英文單字，可以聽發音、看意思</p>
     <div class="note"><b>I am ＋ 動詞-ing</b> ＝ 我正在做某件事。${TIPS[n] ? "<br>" + TIPS[n] : ""}</div>
+    <p class="muted small">等一下要拼出 <b style="font-family:var(--f-en)">${S[n].v}</b> 和 <b style="font-family:var(--f-en)">${nounOf(n)}</b>，看清楚它們怎麼拼。</p>
     <p class="muted small" id="wait">按影片中間的播放鍵，看完一次就會出現下一步。</p>
-    <button class="btn big" id="go" hidden>下一步：選選看</button>
+    <button class="btn big" id="go" hidden>下一步：拼單字</button>
   </div>`);
   wireVideo(() => { const g = $("#go"); if (g && g.hidden) { g.hidden = false; $("#wait").hidden = true; } });
   wireWords(n);
   $("#go").onclick = nextStep;
 }
 
-function quiz() {
-  const n = L.n;
-  L.qi = 0;
-  // 固定順序：先句子題，再單字題
-  L.qs = [
-    { type: "zh", n, opts: shuffle([n, ...pickOthers(n, 1)]) },
-    { type: "vid", n, opts: shuffle([n, ...pickOthers(n, 1)]) },
-  ];
-  question();
-}
-function question() {
-  const q = L.qs[L.qi];
-  const total = L.qs.length;
-  const say = q.type === "vid" ? S[q.n].v : enOf(q.n);
-  const prompt = q.type === "vid" ? "聽單字，選出你聽到的那個字" : "聽句子，選出你聽到的那一句";
-  const media = q.type === "zh" ? `<div class="subs"><p class="zh">${zhHTML(q.n)}</p></div>` : "";
-  const opt = (k) => q.type === "vid"
-    ? `<button class="opt" data-k="${k}"><span class="oe">${S[k].v}</span><span class="oz">${S[k].zv}</span></button>`
-    : `<button class="opt sent" data-k="${k}"><span class="oe">${enHTML(k)}</span></button>`;
-  lessonShell(`<div class="card">
-    <div class="row" style="justify-content:space-between"><p class="ask">${prompt}</p><span class="qcount">${L.qi + 1} / ${total}</span></div>
-    ${media}
-    <div class="row"><button class="btn ghost" id="again">再聽一次</button></div>
-    <div class="opts two">${q.opts.map(opt).join("")}</div>
-    <p class="fb" id="fb"></p>
-    <button class="btn big" id="next" hidden>${L.qi + 1 < total ? "下一題" : "下一步：排句子"}</button>
-  </div>`);
-  wireVideo();
-  let busy = true;
-  // 一進畫面先念，念完才能選
-  speakThen(say, () => { busy = false; });
-  $("#again").onclick = () => { if (!busy) { busy = true; speakThen(say, () => { busy = false; }); } };
-  $$(".opt").forEach((b) => b.onclick = () => {
-    if (busy || b.classList.contains("no") || !$("#next").hidden) return;
-    const k = +b.dataset.k;
-    busy = true;
-    b.classList.add("glow");
-    speakThen(q.type === "vid" ? S[k].v : enOf(k), () => {
-      busy = false;
-      b.classList.remove("glow");
-      const fb = $("#fb");
-      if (k === q.n) {
-        b.classList.add("yes");
-        fb.className = "fb good"; fb.textContent = "答對了！";
-        $("#next").hidden = false; $("#next").focus();
-      } else {
-        L.mistakes++;
-        b.classList.add("no");
-        fb.className = "fb try";
-        fb.textContent = q.type === "zh" ? "沒關係，看看橘色的字，再選一次。" : "沒關係，按「再聽一次」，再選一次。";
-      }
-    });
+// 先拼動詞，再拼名詞；難度跟著這個字現在的階段
+function spellStep() {
+  const k = keysOf(L.n)[L.si];
+  spellQ({
+    n: L.n, k, lvl: Math.max(1, lvlOf(k)),
+    count: `<span class="qcount">${L.si + 1} / 2</span>`,
+    mount: lessonShell,
+    done: (clean) => { if (!clean) L.mistakes++; return clean ? "一次就拼對！" : "拼好了！"; },
+    nextLabel: L.si === 0 ? "下一個字" : "下一步：排句子",
+    next: () => { stopVideo(); if (L.si === 0) { L.si = 1; spellStep(); } else { L.si = 0; nextStep(); } },
   });
-  $("#next").onclick = () => {
-    L.qi++;
-    if (L.qi < L.qs.length) question(); else nextStep();
-  };
 }
 
 function build() {
@@ -825,24 +1027,23 @@ function build() {
   const words = wordsOf(n);
   let order = shuffle(words.map((_, i) => i));
   if (order.every((v, i) => v === i)) order = order.reverse();
-  let placed = 0;
+  let placed = 0, locked = false;
   lessonShell(`<div class="card">
     <p class="ask">照順序按字卡，排出句子</p>
-    ${videoHTML(n)}
+    <p class="zh" style="text-align:center">${zhHTML(n)}</p>
     <div class="slots" id="slots">${words.map(() => `<span class="slot"></span>`).join("")}</div>
     <div class="tiles">${order.map((i) => `<button class="tile" data-i="${i}">${words[i]}</button>`).join("")}</div>
     <p class="fb" id="fb"></p>
     <div class="row"><button class="btn ghost" id="hint">給我提示</button></div>
     <button class="btn big" id="next" hidden>下一步：找錯句</button>
   </div>`);
-  wireVideo();
   const fb = $("#fb");
   try { speechSynthesis.cancel(); } catch (e) {}
   queueEnd = 0;
-  // 按對：字卡立刻移上去，並排隊念出；按錯：不移、不念，輕輕晃一下
+  // 按對：字卡立刻移上去，並排隊念出；按錯：不移、不念，晃一下並停 1 秒
   $$(".tile").forEach((b) => b.onclick = () => {
     const i = +b.dataset.i;
-    if (placed >= words.length || b.classList.contains("used")) return;
+    if (locked || placed >= words.length || b.classList.contains("used")) return;
     if (words[i] === words[placed]) {
       $(".slot").outerHTML = `<span class="placed">${i === 2 ? `<span class="v">${words[i]}</span>` : words[i]}${placed === words.length - 1 ? "." : ""}</span>`;
       b.classList.add("used"); $$(".tile").forEach((t) => t.classList.remove("glow"));
@@ -855,9 +1056,10 @@ function build() {
         sayQueued(enOf(n), () => { const nx = $("#next"); if (nx) nx.hidden = false; });
       }
     } else {
-      L.mistakes++;
+      L.mistakes++; locked = true;
       b.classList.remove("shake"); void b.offsetWidth; b.classList.add("shake");
-      fb.className = "fb try"; fb.textContent = "不是這個字。可以播影片聽聽看，或按「給我提示」。";
+      fb.className = "fb try"; fb.textContent = "不是這個字。想想中文的順序，或按「給我提示」。";
+      setTimeout(() => { locked = false; }, 1000);
     }
   });
   $("#hint").onclick = () => {
@@ -867,7 +1069,7 @@ function build() {
   $("#next").onclick = nextStep;
 }
 
-// 找錯句：選錯不計入選錯次數
+// 找錯句：選錯不計入選錯次數，但選錯後停 1 秒
 function findWrong() {
   const [a, b, bad, why] = F[L.n];
   const opts = shuffle([{ s: a, bad: false }, { s: b, bad: false }, { s: bad, bad: true }]);
@@ -879,8 +1081,9 @@ function findWrong() {
     <p class="why" id="why" hidden></p>
     <button class="btn big" id="next" hidden>完成這一句</button>
   </div>`);
+  let locked = false;
   $$(".opt").forEach((btn) => btn.onclick = () => {
-    if (btn.classList.contains("no") || !$("#next").hidden) return;
+    if (locked || btn.classList.contains("no") || !$("#next").hidden) return;
     const o = opts[+btn.dataset.i];
     const fb = $("#fb");
     if (o.bad) {
@@ -890,9 +1093,11 @@ function findWrong() {
       speak(fEn(o.s));
       $("#next").hidden = false; $("#next").focus();
     } else {
+      locked = true;
       btn.classList.add("no");
       fb.className = "fb try"; fb.textContent = "這句是對的，這件事做得到。再看看另外兩句。";
       speak(fEn(o.s));
+      setTimeout(() => { locked = false; }, 1000);
     }
   });
   $("#next").onclick = nextStep;
@@ -905,10 +1110,12 @@ function itemDone() {
   stopVideo();
   if (kind === "new" && !isLearned(n)) {
     st.learned.push(n);
-    st.info[n] = { learned: t, reviews: 0, stars: 0, starDay: "", lastReview: "" };
+    st.info[n] = { learned: t, reviews: 0, lastReview: "" };
+    addWords(n, t);
+    st.newDay = t;
     st.log.push({ kind: "new", n: n + 1, date: t, secs, mistakes: L.mistakes });
     save();
-    sendReport("new", n, secs, L.mistakes, false);
+    sendReport("new", n, secs, L.mistakes);
     L = null;
     app.innerHTML = dessertCard(n, "pop");
     $("#ok").onclick = home;
@@ -918,21 +1125,83 @@ function itemDone() {
   const I = st.info[n];
   I.reviews++;
   I.lastReview = t;
-  let star = false;
-  if (I.learned !== t && I.starDay !== t) { I.stars++; I.starDay = t; star = I.stars <= MAX_STARS; }
   st.log.push({ kind: "rev", n: n + 1, date: t, secs, mistakes: L.mistakes });
   save();
-  sendReport("review", n, secs, L.mistakes, star);
+  sendReport("review", n, secs, L.mistakes);
   L = null;
-  const why = I.learned === t ? "今天剛學會的句子，明天再複習才會加星星。" : !star && I.starDay === t && I.stars <= MAX_STARS ? "今天已經加過星星了，明天再複習可以再加一顆。" : "";
-  app.innerHTML = `<div class="card reveal ${star ? "pop" : ""}">
+  app.innerHTML = `<div class="card reveal">
     <p class="muted">複習完成</p>
     ${ART[n]}
     <div class="subs"><p class="en">${enHTML(n)}</p><p class="zh">${zhHTML(n)}</p></div>
-    ${star ? `<p class="starline">得到一顆星星！</p>` : ""}
-    <p class="starline">${starStr(starsOf(n)) || "（還沒有星星）"}</p>
-    <p class="muted">這句已經複習 ${I.reviews} 次。${why}</p>
-    <button class="btn big" id="ok">回集點卡</button>
+    <div class="wlist">${keysOf(n).map((k) => wordRow(k)).join("")}</div>
+    <p class="muted small">這句已經複習 ${I.reviews} 次。字要在「今日出爐」裡第一次就拼對，才會往下一個階段前進。</p>
+    <button class="btn big" id="ok">回首頁</button>
+  </div>`;
+  $("#ok").onclick = home;
+  window.scrollTo(0, 0);
+}
+
+/* ---------- 今日出爐：每天一輪，6～8 題，題數固定看得到 ---------- */
+let DS = null;
+function startDaily() {
+  stopVideo(); L = null;
+  const keys = dailyKeys();
+  if (!keys.length) return home();
+  DS = { q: shuffle(keys).map((k) => ({ k, type: "spell" })), i: 0, start: Date.now(), total: keys.length, clean: 0, ups: [], stuck: [] };
+  dailyQ();
+}
+function dailyShell(body) {
+  const dots = DS.q.map((_, i) => `<i class="${i < DS.i ? "done" : i === DS.i ? "now" : ""}"></i>`).join("");
+  app.innerHTML = `<div class="top"><div class="brand"><h1>今日出爐</h1></div><button class="chip" id="rest">休息一下</button></div>
+    <div class="row" style="justify-content:space-between"><span class="dots">${dots}</span><span class="qcount">還剩 ${DS.q.length - DS.i} 題</span></div>${body}`;
+  $("#rest").onclick = home;
+  window.scrollTo(0, 0);
+}
+function dailyQ() {
+  stopVideo();
+  if (DS.i >= DS.q.length) return dailyDone();
+  const it = DS.q[DS.i];
+  const ns = sentOf(it.k).filter(isLearned);
+  const n = ns[Math.floor(Math.random() * ns.length)];
+  const nextLabel = () => DS.i === DS.q.length - 1 ? "完成今日出爐" : "下一題";
+  const next = () => { DS.i++; dailyQ(); };
+  if (it.type === "pick") return pickQ({ n, k: it.k, mount: dailyShell, nextLabel, next });
+  spellQ({
+    n, k: it.k, lvl: Math.max(1, lvlOf(it.k)), mount: dailyShell, nextLabel, next,
+    done: (clean) => {
+      const up = grade(it.k, clean);
+      let msg;
+      if (clean) {
+        DS.clean++;
+        if (up) DS.ups.push(it.k);
+        msg = up ? `一次就拼對！<b style="font-family:var(--f-en)">${wText(it.k)}</b>：${STAGES[up[0]]} → ${stageHTML(up[1])}` : "一次就拼對！";
+      } else {
+        DS.stuck.push(it.k);
+        DS.q.push({ k: it.k, type: "pick" });
+        msg = "拼好了！這個字等一下會用另一種方式再出現一次，明天也會再練。";
+      }
+      save();
+      return msg;
+    },
+  });
+}
+function dailyDone() {
+  const t = today();
+  const secs = Math.round((Date.now() - DS.start) / 1000);
+  const ds = DS;
+  st.log.push({ kind: "daily", date: t, secs, total: ds.total, clean: ds.clean, stuck: ds.stuck.map(wText) });
+  save();
+  sendDaily(ds, secs);
+  DS = null;
+  const shown = [...new Set(ds.q.map((x) => x.k))];
+  const blk = newBlock();
+  app.innerHTML = `<div class="card reveal">
+    <p class="muted">今日出爐完成</p>
+    <p class="dname">${ds.clean} / ${ds.total}</p>
+    <p class="muted">個字第一次就拼對</p>
+    <div class="wlist">${shown.map((k) => wordRow(k, ds.ups.includes(k) ? `<span class="up">↑ 升級</span>` : "")).join("")}</div>
+    <p class="small">${st.learned.length === 24 ? "明天再來烤下一批！" : blk === "today" ? "今天已經學過新句子了，明天見！" : "現在可以回集點卡，學一句新的句子。"}</p>
+    <button class="btn big" id="ok">回首頁</button>
   </div>`;
   $("#ok").onclick = home;
   window.scrollTo(0, 0);
@@ -948,8 +1217,9 @@ function dessertCard(i, mode) {
     ${ART[i]}
     <div><p class="dname">${d.name}</p><p class="dname-en">${d.en}</p></div>
     <div class="facts"><div><b>來自</b>${d.from}</div><div><b>小知識</b>${d.fact}</div><div><b>學到的句子</b><span style="font-family:var(--f-en);font-weight:600">${enHTML(i)}</span></div>
-    ${!pop && I ? `<div><b>複習</b>${I.reviews} 次　<span class="starline" style="font-size:17px">${starStr(starsOf(i))}</span></div>` : ""}</div>
-    ${pop ? `<button class="btn big" id="ok">回集點卡</button>` : `<div class="btn2"><button class="btn ghost" id="ok">關閉</button><button class="btn" id="rev">複習</button></div>`}
+    ${I ? `<div class="wlist">${keysOf(i).map((k) => wordRow(k)).join("")}</div>` : ""}
+    ${!pop && I ? `<div><b>複習</b>${I.reviews} 次</div>` : ""}</div>
+    ${pop ? `<p class="small">這兩個字現在是「麵糊」。明天的「今日出爐」會考它們，第一次就拼對就會進烤箱。</p><button class="btn big" id="ok">回首頁</button>` : `<div class="btn2"><button class="btn ghost" id="ok">關閉</button><button class="btn" id="rev">複習</button></div>`}
   </div>`;
 }
 function showDessert(i) {
@@ -964,15 +1234,15 @@ function showDessert(i) {
 }
 function shelf() {
   stopVideo();
-  L = null;
-  app.innerHTML = `<div class="top"><div class="brand"><h1>我的點心櫃</h1><span>${st.learned.length} / 24　★ ${totalStars()}</span></div>
+  L = null; DS = null;
+  app.innerHTML = `<div class="top"><div class="brand"><h1>我的點心櫃</h1><span>${st.learned.length} / 24　完美 ${perfectCount()} 個字</span></div>
     <button class="chip" id="back">回首頁</button></div>
     <p class="muted small">按英文句子可以聽朗讀；按點心可以看介紹、複習。</p>
     <div class="shelf-list">${D.map((d, i) => isLearned(i)
       ? `<div class="srow"><button class="sart" data-i="${i}" aria-label="${d.name}">${ART[i]}</button>
           <div class="stext"><button class="sname" data-i="${i}">${d.name}</button>
           <button class="ssay" data-n="${i}"><span class="sen">${enHTML(i)}</span><span class="szh">${S[i].zh}</span></button>
-          <span class="starline" style="font-size:15px">${starStr(starsOf(i))}</span></div></div>`
+          <span class="wtags">${keysOf(i).map((k) => `<span class="wb">${wText(k)} ${stageHTML(lvlOf(k))}</span>`).join("")}</span></div></div>`
       : `<div class="srow locked"><div class="sart"><span class="q">?</span></div><div class="stext"><span class="muted">第 ${i + 1} 句</span></div></div>`).join("")}</div>`;
   $("#back").onclick = home;
   $$(".sart[data-i], .sname").forEach((b) => b.onclick = () => showDessert(+b.dataset.i));
@@ -980,16 +1250,27 @@ function shelf() {
   window.scrollTo(0, 0);
 }
 
-/* ---------- 寄信通知：新句和複習每一句都寄 ---------- */
-function sendReport(kind, n, secs, mistakes, star) {
-  if (!REPORT_URL) return;
-  const I = st.info[n];
-  st.outbox = st.outbox || [];
-  st.outbox.push({
-    token: REPORT_TOKEN, kind, date: today(), n: n + 1, sentence: enOf(n), zh: S[n].zh,
+/* ---------- 寄信通知：新句、複習、每一輪今日出爐都寄 ---------- */
+const wordsLine = (keys) => keys.map((k) => `${wText(k)}（${zhOf(k)}）${STAGES[lvlOf(k)]}`).join("、");
+function sendReport(kind, n, secs, mistakes) {
+  queueReport({
+    kind, date: today(), n: n + 1, sentence: enOf(n), zh: S[n].zh,
     dessert: D[n].name, dessertEn: D[n].en, minutes: Math.round(secs / 6) / 10, mistakes,
-    reviews: I.reviews, stars: starsOf(n), newStar: star, collected: st.learned.length, totalStars: totalStars(),
+    reviews: st.info[n].reviews, words: wordsLine(keysOf(n)),
+    collected: st.learned.length, perfect: perfectCount(), totalWords: learnedKeys().length,
   });
+}
+function sendDaily(ds, secs) {
+  queueReport({
+    kind: "daily", date: today(), minutes: Math.round(secs / 6) / 10, total: ds.total, clean: ds.clean,
+    ups: wordsLine(ds.ups), stuck: ds.stuck.map((k) => `${wText(k)}（${zhOf(k)}）`).join("、"),
+    collected: st.learned.length, perfect: perfectCount(), totalWords: learnedKeys().length,
+  });
+}
+function queueReport(body) {
+  if (!REPORT_URL) return;
+  st.outbox = st.outbox || [];
+  st.outbox.push({ token: REPORT_TOKEN, ...body });
   save();
   flushReports();
 }
@@ -1022,14 +1303,32 @@ function parentGate() {
   $("#enter").onclick = () => { if ($("#ans").value.trim() === "37") parent(); else { $("#fb").className = "fb try"; $("#fb").textContent = "答案不對。"; } };
 }
 function parent(confirmReset = false) {
-  const rows = st.log.slice().reverse().map((e) => `<tr><td>${e.date}</td><td>${e.kind === "rev" ? "複習" : "新句"}</td><td>第 ${e.n} 句 ${S[e.n - 1].v}</td><td>${Math.max(1, Math.round(e.secs / 60))} 分</td><td>${e.mistakes}</td></tr>`).join("");
+  const t = today();
+  const TYPE = { daily: "今日出爐", rev: "複習", new: "新句" };
+  const rows = st.log.slice().reverse().map((e) => {
+    const what = e.kind === "daily" ? `${e.total} 個字` : `第 ${e.n} 句 ${S[e.n - 1].v}`;
+    const res = e.kind === "daily"
+      ? `一次就對 ${e.clean}/${e.total}${e.stuck && e.stuck.length ? `；卡住：${e.stuck.join("、")}` : ""}`
+      : `選錯 ${e.mistakes}`;
+    return `<tr><td>${e.date}</td><td>${TYPE[e.kind] || e.kind}</td><td>${what}</td><td>${Math.max(1, Math.round(e.secs / 60))} 分</td><td>${res}</td></tr>`;
+  }).join("");
+  const rate = (k) => { const w = st.words[k]; return w.seen ? w.first / w.seen : 2; };
+  const wk = learnedKeys().sort((a, b) => rate(a) - rate(b) || lvlOf(a) - lvlOf(b));
+  const wrows = wk.map((k) => {
+    const w = st.words[k];
+    return `<tr><td style="font-family:var(--f-en)">${wText(k)}</td><td>${zhOf(k)}</td><td>${STAGES[w.lvl]}</td><td>${w.seen ? `${w.first} / ${w.seen}` : "—"}</td><td>${w.due <= t ? "今天" : w.due}</td></tr>`;
+  }).join("");
   app.innerHTML = `<div class="top"><div class="brand"><h1>家長區</h1></div><button class="chip" id="back">回首頁</button></div>
+    <div class="card"><h3>單字進度</h3>
+      <p class="muted small">已學會 ${st.learned.length} / 24 句，共 ${wk.length} 個字，其中 ${perfectCount()} 個「完美」。「一次就對」＝在今日出爐第一次就拼對的次數 / 出現次數；最常卡住的字排在最上面。</p>
+      <div class="tbl"><table><thead><tr><th>英文</th><th>中文</th><th>階段</th><th>一次就對</th><th>下次</th></tr></thead><tbody>${wrows || `<tr><td colspan="5" class="muted">還沒有單字</td></tr>`}</tbody></table></div>
+    </div>
     <div class="card"><h3>學習紀錄</h3>
-      <p class="muted small">已學會 ${st.learned.length} / 24 句，星星共 ${totalStars()} 顆。紀錄只存在這台裝置上。選錯次數包含選選看和排句子，不含找錯句。</p>
-      <div class="tbl"><table><thead><tr><th>日期</th><th>類型</th><th>句子</th><th>時間</th><th>選錯</th></tr></thead><tbody>${rows || `<tr><td colspan="5" class="muted">還沒有紀錄</td></tr>`}</tbody></table></div>
+      <p class="muted small">紀錄只存在這台裝置上。新句和複習的選錯次數包含拼單字和排句子，不含找錯句。</p>
+      <div class="tbl"><table><thead><tr><th>日期</th><th>類型</th><th>內容</th><th>時間</th><th>結果</th></tr></thead><tbody>${rows || `<tr><td colspan="5" class="muted">還沒有紀錄</td></tr>`}</tbody></table></div>
     </div>
     <div class="card"><h3>完成通知</h3>
-      <p class="small">${REPORT_URL ? `每完成一句（新句或複習），會自動通知 ${REPORT_TO}。` : `尚未設定寄信網址，目前不會寄出通知。`}</p>
+      <p class="small">${REPORT_URL ? `每完成一句新句、一次複習或一輪今日出爐，會自動通知 ${REPORT_TO}。` : `尚未設定寄信網址，目前不會寄出通知。`}</p>
       ${st.outbox && st.outbox.length ? `<p class="small muted">有 ${st.outbox.length} 封通知等網路恢復後寄出。</p>` : ""}
       ${REPORT_URL ? `<div class="row"><button class="btn ghost" id="testMail">寄一封測試信</button></div><p class="fb" id="mailFb"></p>` : ""}</div>
     <div class="card"><h3>朗讀聲音</h3>
