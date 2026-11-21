@@ -308,6 +308,23 @@ input[type=text], input[type=number] { font: inherit; font-size: 20px; padding: 
 .tile.letter { min-width: 56px; font-size: 28px; }
 .frame { font-size: clamp(24px, 5.4vw, 36px); }
 .gap { display: inline-block; min-width: 2.2em; border-bottom: 3px solid var(--accent); color: var(--accent); }
+button.gap { font: inherit; background: var(--accent-soft); border: 0; border-bottom: 3px solid var(--accent); border-radius: 8px 8px 0 0; padding: 0 .15em; cursor: pointer; }
+button.gap:active, button.gap.say { background: var(--accent); color: var(--accent-ink); }
+
+/* 找錯句：一次一句的 O / X */
+.opt.find.oxs { align-items: center; min-height: 96px; }
+.oxrow { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.ox {
+  min-height: 112px; border-radius: 18px; border: 3px solid var(--line); background: var(--surface);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  font-family: var(--f-en); font-size: 56px; font-weight: 700; line-height: 1;
+}
+.ox small { font-family: var(--f-zh); font-size: 17px; font-weight: 500; color: var(--muted); }
+.ox.o { color: var(--ok); }
+.ox.x { color: var(--verb); }
+.ox.yes { border-color: var(--ok); background: var(--ok-bg); }
+.ox.shake { animation: shake .35s; }
+.ox[disabled] { opacity: .45; cursor: default; }
 
 /* stars: lit ones in gold, the rest faded */
 .stars .off { opacity: .22; }
@@ -557,6 +574,33 @@ const F = [
   [["Crush", "the garlic", "壓碎", "大蒜"], ["Crush", "the cookies", "壓碎", "餅乾"], ["Crush", "the soup", "壓碎", "湯"], "湯是液體，壓不碎。"],
   [["Boil", "the water", "燒開", "水"], ["Boil", "the eggs", "煮", "蛋"], ["Boil", "the paper", "煮", "紙"], "紙不是食物，一煮就爛掉。"],
 ];
+// 每一句再多一個錯句：[錯句, 理由]，和 F 的錯句一起用，讓找錯句有時 1 句錯、有時 2 句錯
+const F2 = [
+  [["Chop", "the soup", "切碎", "湯"], "湯是液體，不能用刀切碎。"],
+  [["Fry", "the ice cream", "煎", "冰淇淋"], "冰淇淋一下鍋就融化了。"],
+  [["Flip", "the milk", "翻", "牛奶"], "牛奶是液體，翻不過來。"],
+  [["Roast", "the juice", "烤", "果汁"], "果汁是液體，不能放進烤箱烤。"],
+  [["Knead", "the water", "揉", "水"], "水是液體，揉不成一團。"],
+  [["Squeeze", "a spoon", "擠", "湯匙"], "湯匙是金屬做的，擠不出汁。"],
+  [["Slice", "the soup", "切片", "湯"], "湯是液體，切不成片。"],
+  [["Mash", "the plate", "搗成泥", "盤子"], "盤子很硬，搗不成泥。"],
+  [["Crack", "the juice", "敲開", "果汁"], "果汁沒有殼，不用敲開。"],
+  [["Scale", "the bread", "刮魚鱗", "麵包"], "麵包沒有魚鱗。"],
+  [["Carve", "the soup", "分切", "湯"], "湯是液體，不能切。"],
+  [["Whisk", "the potatoes", "攪打", "馬鈴薯"], "生的馬鈴薯很硬，打蛋器打不動。"],
+  [["Dice", "the milk", "切丁", "牛奶"], "牛奶是液體，切不成小塊。"],
+  [["Zest", "the water", "刨皮", "水"], "水沒有皮可以刨。"],
+  [["Peel", "the milk", "剝", "牛奶"], "牛奶沒有皮可以剝。"],
+  [["Pour", "the apple", "倒", "蘋果"], "蘋果是固體，不能像水一樣倒出來。"],
+  [["Wash", "the salt", "洗", "鹽"], "鹽一碰到水就溶化了。"],
+  [["Toast", "the soup", "烤", "湯"], "湯是液體，不能放進烤麵包機。"],
+  [["Bake", "the ice", "烤", "冰塊"], "冰塊一烤就融化了。"],
+  [["Stir", "the apple", "攪拌", "蘋果"], "一整顆蘋果是固體，不能用湯匙攪拌。"],
+  [["Grate", "the water", "磨", "水"], "水是液體，不能磨。"],
+  [["Whip", "the rice", "打發", "白飯"], "白飯不會被打出泡泡。"],
+  [["Crush", "the water", "壓碎", "水"], "水是液體，壓不碎。"],
+  [["Boil", "the phone", "煮", "手機"], "手機不是食物，一煮就壞掉了。"],
+];
 const fEn = (s) => `${s[0]} ${s[1]}.`;
 // 中文分別放在動詞和名詞下面
 // the / a / an 下面不放中文，名詞的中文放在名詞正下方
@@ -733,7 +777,7 @@ function zhMark(n, k) {
 }
 // 英文句子，要拼的字挖空
 function frameHTML(n, k) {
-  const gap = `<span class="gap">？</span>`;
+  const gap = `<button class="gap" id="sayw" aria-label="聽這個字怎麼念">？</button>`;
   return isVerb(k) ? `I am ${gap} ${S[n].o}.` : `I am <span class="v">${S[n].v}</span> ${artOf(n)}${gap}.`;
 }
 function meaningOf(n, i) {
@@ -813,6 +857,7 @@ function spellQ(o) {
   const box = (i) => plan.miss.includes(i) ? `<span class="lt blank" data-p="${i}"></span>` : `<span class="lt given">${word[i]}</span>`;
   o.mount(`<div class="card">
     <div class="row" style="justify-content:space-between"><p class="ask">拼出「${zhOf(k, n)}」的英文</p>${o.count || ""}</div>
+    <p class="muted small">按句子裡的 <b style="color:var(--accent)">？</b> 可以聽這個字怎麼念。</p>
     ${loopHTML(n)}
     <div class="subs" id="sent"><p class="en frame">${frameHTML(n, k)}</p><p class="zh">${zhMark(n, k)}</p></div>
     <div class="word">${[...word].map((_, i) => box(i)).join("")}</div>
@@ -822,6 +867,11 @@ function spellQ(o) {
     <button class="btn big" id="next" hidden></button>
   </div>`);
   wireLoop();
+  // 聽發音不算用提示：還是要自己把字拼出來
+  $("#sayw").onclick = () => {
+    const g = $("#sayw"); g.classList.add("say");
+    speakThen(word, () => g.classList.remove("say"));
+  };
   const fb = $("#fb");
   const want = () => word[plan.miss[pos]];
   const mark = () => $$(".lt.blank").forEach((s) => s.classList.toggle("cur", +s.dataset.p === plan.miss[pos]));
@@ -1003,38 +1053,52 @@ function build() {
   $("#next").onclick = nextStep;
 }
 
-// 找錯句：選錯不計入選錯次數，但選錯後停 1 秒
+// 找錯句：一次一句，判斷這件事做得到（○）還是做不到（✕）
+// 共 3 句，隨機 1 句錯或 2 句錯；先念完句子才能作答；答錯不計入選錯次數，晃一下並停 1 秒再答
 function findWrong() {
-  const [a, b, bad, why] = F[L.n];
-  const opts = shuffle([{ s: a, bad: false }, { s: b, bad: false }, { s: bad, bad: true }]);
+  const [a, b, bad, why] = F[L.n], [bad2, why2] = F2[L.n];
+  const good = shuffle([a, b]).map((s) => ({ s, bad: false }));
+  const wrong = shuffle([{ s: bad, bad: true, why }, { s: bad2, bad: true, why: why2 }]);
+  const items = Math.random() < 0.5 ? [good[0], ...wrong] : [...good, wrong[0]];
+  L.fw = { items: shuffle(items), i: 0 };
+  oxQ();
+}
+function oxQ() {
+  const { items, i } = L.fw, it = items[i], last = i === items.length - 1;
   lessonShell(`<div class="card">
-    <p class="ask">找錯句：哪一句是錯的？</p>
-    <p class="muted">三件事裡，有一件做不到。</p>
-    <div class="opts">${opts.map((o, i) => `<button class="opt find" data-i="${i}">${glossHTML(o.s)}</button>`).join("")}</div>
+    <div class="row" style="justify-content:space-between"><p class="ask">這件事做得到嗎？</p><span class="qcount">${i + 1} / ${items.length}</span></div>
+    <p class="muted small">三句裡，有時一句做不到，有時兩句做不到。按句子可以再聽一次。</p>
+    <button class="opt find oxs" id="say">${glossHTML(it.s)}</button>
+    <div class="oxrow">
+      <button class="ox o" data-a="o" disabled>○<small>做得到</small></button>
+      <button class="ox x" data-a="x" disabled>✕<small>做不到</small></button>
+    </div>
     <p class="fb" id="fb"></p>
     <p class="why" id="why" hidden></p>
-    <button class="btn big" id="next" hidden>完成這一句</button>
+    <button class="btn big" id="next" hidden>${last ? "完成這一句" : "下一句"}</button>
   </div>`);
-  let locked = false;
-  $$(".opt").forEach((btn) => btn.onclick = () => {
-    if (locked || btn.classList.contains("no") || !$("#next").hidden) return;
-    const o = opts[+btn.dataset.i];
+  let busy = true;
+  const unlock = () => { busy = false; $$(".ox").forEach((x) => { x.disabled = false; }); };
+  speakThen(fEn(it.s), unlock);
+  $("#say").onclick = () => speak(fEn(it.s));
+  $$(".ox").forEach((btn) => btn.onclick = () => {
+    if (busy || !$("#next").hidden) return;
     const fb = $("#fb");
-    if (o.bad) {
-      btn.classList.add("found");
-      fb.className = "fb good"; fb.textContent = "對！這句是錯句。";
-      $("#why").textContent = why; $("#why").hidden = false;
-      speak(fEn(o.s));
+    if ((btn.dataset.a === "x") === it.bad) {
+      btn.classList.add("yes");
+      $$(".ox").forEach((x) => { if (x !== btn) x.disabled = true; });
+      fb.className = "fb good"; fb.textContent = it.bad ? "對！這件事做不到。" : "對！這件事做得到。";
+      if (it.bad) { $("#why").textContent = it.why; $("#why").hidden = false; }
+      sfxWord();
       $("#next").hidden = false; $("#next").focus();
     } else {
-      locked = true;
-      btn.classList.add("no");
-      fb.className = "fb try"; fb.textContent = "這句是對的，這件事做得到。再看看另外兩句。";
-      speak(fEn(o.s));
-      setTimeout(() => { locked = false; }, 1000);
+      busy = true;
+      btn.classList.remove("shake"); void btn.offsetWidth; btn.classList.add("shake");
+      fb.className = "fb try"; fb.textContent = it.bad ? "再想一想：這件事真的做得到嗎？" : "再想一想：這件事真的做不到嗎？";
+      setTimeout(() => { busy = false; }, 1000);
     }
   });
-  $("#next").onclick = nextStep;
+  $("#next").onclick = () => { if (last) nextStep(); else { L.fw.i++; oxQ(); } };
 }
 
 function itemDone() {
