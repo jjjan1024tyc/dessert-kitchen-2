@@ -601,6 +601,33 @@ const F2 = [
   [["Crush", "the water", "壓碎", "水"], "水是液體，壓不碎。"],
   [["Boil", "the phone", "煮", "手機"], "手機不是食物，一煮就壞掉了。"],
 ];
+// 每一句再多一個做得到的句子，讓找錯句湊滿 4 句（1 句錯時要 3 句做得到）
+const F3 = [
+  ["Chop", "the garlic", "切碎", "大蒜"],
+  ["Fry", "the chicken", "煎", "雞肉"],
+  ["Flip", "the eggs", "翻", "蛋"],
+  ["Roast", "the vegetables", "烤", "蔬菜"],
+  ["Knead", "the pizza dough", "揉", "披薩麵團"],
+  ["Squeeze", "the toothpaste", "擠", "牙膏"],
+  ["Slice", "the tomato", "切片", "番茄"],
+  ["Mash", "the avocado", "搗成泥", "酪梨"],
+  ["Crack", "the crab", "敲開", "螃蟹"],
+  ["Scale", "the carp", "刮魚鱗", "鯉魚"],
+  ["Carve", "the ham", "分切", "火腿"],
+  ["Whisk", "the milk", "攪打", "牛奶"],
+  ["Dice", "the onions", "切丁", "洋蔥"],
+  ["Zest", "the limes", "刨皮", "萊姆"],
+  ["Peel", "the potatoes", "削皮", "馬鈴薯"],
+  ["Pour", "the juice", "倒", "果汁"],
+  ["Wash", "the apples", "洗", "蘋果"],
+  ["Toast", "the bagel", "烤", "貝果"],
+  ["Bake", "the bread", "烤", "麵包"],
+  ["Stir", "the tea", "攪拌", "茶"],
+  ["Grate", "the ginger", "磨", "薑"],
+  ["Whip", "the butter", "打發", "奶油"],
+  ["Crush", "the ice", "壓碎", "冰塊"],
+  ["Boil", "the noodles", "煮", "麵條"],
+];
 const fEn = (s) => `${s[0]} ${s[1]}.`;
 // 中文分別放在動詞和名詞下面
 // the / a / an 下面不放中文，名詞的中文放在名詞正下方
@@ -1054,12 +1081,12 @@ function build() {
 }
 
 // 找錯句：一次一句，判斷這件事做得到（○）還是做不到（✕）
-// 共 3 句，隨機 1 句錯或 2 句錯；先念完句子才能作答；答錯不計入選錯次數，晃一下並停 1 秒再答
+// 共 4 句：隨機 1 句錯（3 對 1 錯）或 2 句錯（2 對 2 錯）；先念完句子才能作答；答錯不計入選錯次數，晃一下並停 1 秒再答
 function findWrong() {
   const [a, b, bad, why] = F[L.n], [bad2, why2] = F2[L.n];
-  const good = shuffle([a, b]).map((s) => ({ s, bad: false }));
+  const good = shuffle([a, b, F3[L.n]]).map((s) => ({ s, bad: false }));
   const wrong = shuffle([{ s: bad, bad: true, why }, { s: bad2, bad: true, why: why2 }]);
-  const items = Math.random() < 0.5 ? [good[0], ...wrong] : [...good, wrong[0]];
+  const items = Math.random() < 0.5 ? [...good.slice(0, 2), ...wrong] : [...good, wrong[0]];
   L.fw = { items: shuffle(items), i: 0 };
   oxQ();
 }
@@ -1067,7 +1094,7 @@ function oxQ() {
   const { items, i } = L.fw, it = items[i], last = i === items.length - 1;
   lessonShell(`<div class="card">
     <div class="row" style="justify-content:space-between"><p class="ask">這件事做得到嗎？</p><span class="qcount">${i + 1} / ${items.length}</span></div>
-    <p class="muted small">三句裡，有時一句做不到，有時兩句做不到。按句子可以再聽一次。</p>
+    <p class="muted small">四句裡，有時一句做不到，有時兩句做不到。按句子可以再聽一次。</p>
     <button class="opt find oxs" id="say">${glossHTML(it.s)}</button>
     <div class="oxrow">
       <button class="ox o" data-a="o" disabled>○<small>做得到</small></button>
